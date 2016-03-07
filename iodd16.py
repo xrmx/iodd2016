@@ -159,7 +159,8 @@ def studiok_atti_di_concessione(data):
     mkdir('atti')
     header = (
         'Url', 'Beneficiario', 'Indirizzo Beneficiario', 'Località beneficiario', 'Importo',
-        'Oggetto', 'Norma', 'Modalità', 'Allegati', 'Numero pubblicazione', 'Descrizione'
+        'Oggetto', 'Norma', 'Ufficio Funzione', 'Modalità', 'Allegati', 'Numero pubblicazione',
+        'Descrizione'
     )
     for piva, url, comune_data in scraped_data:
         filename = os.path.join('atti', '{}.csv'.format(piva))
@@ -168,7 +169,7 @@ def studiok_atti_di_concessione(data):
             writer.writerow(header)
             for row in comune_data:
                 row['Url'] = url 
-                data = [row[col] for col in comune_data]
+                data = [row[col] for col in header]
                 writer.writerow(data)
 
 
