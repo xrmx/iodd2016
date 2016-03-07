@@ -12,10 +12,11 @@ from lxml.html import fromstring
 from lxml.etree import fromstring as xmlfromstring
 import requests
 
-from StringIO import StringIO
+from cStringIO import StringIO
 from collections import defaultdict, Counter
 from urlparse import urlparse, parse_qs
 
+import errno
 import sys
 import csv
 import re
@@ -74,31 +75,60 @@ class StudioK(object):
     """http://albo.studiok.it/casella/trasparenza/?type=xml"""
     """ALLEGATI: scrape http://albo.studiok.it/lozza/contratti/dettaglio.php?id=MEST0000000052015"""
 
+    COMUNE_RE = re.compile('ART.26  (.+)$')
+
     def get_concessioni_url(self, comune):
         return "http://albo.studiok.it/{}/trasparenza/?type=excel".format(comune)
 
-    def concessioni(self, comuni):
+    def get_trasparenza_url(self, comune):
+        return "http://albo.studiok.it/{}/trasparenza/".format(comune)
+
+    def concessioni(self, comuni, header):
         data = []
 
         piva_comuni = {}
         with open(COMUNI_CSV_PATH, 'r') as f:
             reader = csv.reader(f, delimiter=',')
             for comune, piva in reader:
-                piva_comuni[comune] = piva
+                piva_comuni[comune.strip().lower()] = piva
 
         for comune in comuni:
-            url = self.get_concessioni_url(comune)
+            url = self.get_trasparenza_url(comune)
             r = requests.get(url)
-            f = StringIO(r.text)
-            comune_data = []
-            # FIXME: BOOM!
-            for row in csv.DictReader(f, delimiter='\t'):
-                comune_data.append(row)
+
+            html = fromstring(r.text)
+            try:
+                h1 = html.cssselect('h1')[0].text_content()
+            except IndexError:
+                print "non trovo h1 per comune {}, skippo".format(comune)
+                continue
+            try:
+                comune_norm = self.COMUNE_RE.search(h1).groups(0)[0].strip().lower()
+            except AttributeError:
+                print "per comune {} h1 fatto in modo strano, skippo: {}".format(comune, h1)
+                continue
 
             try:
-                piva = piva_comuni[comune]
+                piva = piva_comuni[comune_norm]
             except KeyError:
+                print "non trovo comune {} normalizzato {}".format(comune, comune_norm)
                 continue
+
+            comune_data = []
+
+            url = self.get_concessioni_url(comune)
+            r = requests.get(url)
+
+            # in python2 csv does not handle unicode objects
+            response_text = r.text.encode(encoding='utf-8', errors='replace')
+            f = StringIO(response_text)
+            for row in csv.DictReader(f, fieldnames=header, delimiter='\t'):
+                row['Url'] = url
+                try:
+                    del row[None]
+                except:
+                    pass
+                comune_data.append(row)
 
             data.append((piva, url, comune_data))
         return data
@@ -153,24 +183,23 @@ def studiok_atti_di_concessione(data):
         comune = match.groups(0)[0]
         comuni.append(comune)
 
+    header = (
+        'Registro', 'Indirizzo Beneficiario', 'Modalità', 'Località beneficiario', 'Beneficiario',
+        'Data Annullamento', 'Norma', 'Oggetto', 'Codice Fiscale', 'Descrizione', 'Partita IVA',
+        'Tipo Pubblicazione', 'Data Registro', 'Ufficio Funzione', 'Numero Pubblicazione',
+        'Estratto', 'Importo', 'Annullamento'
+    )
     scraper = StudioK()
-    scraped_data = scraper.concessioni(comuni)
+    scraped_data = scraper.concessioni(comuni, header)
 
     mkdir('atti')
-    header = (
-        'Url', 'Beneficiario', 'Indirizzo Beneficiario', 'Località beneficiario', 'Importo',
-        'Oggetto', 'Norma', 'Ufficio Funzione', 'Modalità', 'Allegati', 'Numero pubblicazione',
-        'Descrizione'
-    )
+
     for piva, url, comune_data in scraped_data:
         filename = os.path.join('atti', '{}.csv'.format(piva))
         with open(filename, 'w+') as outfile:
-            writer = csv.writer(outfile, delimiter=',')
-            writer.writerow(header)
-            for row in comune_data:
-                row['Url'] = url 
-                data = [row[col] for col in header]
-                writer.writerow(data)
+            output_header = ('Url',)+header
+            writer = csv.DictWriter(outfile, fieldnames=output_header, delimiter=',')
+            writer.writerows(comune_data)
 
 
 def mkdir(path):
@@ -184,9 +213,8 @@ def mkdir(path):
 
 if __name__ == '__main__':
     data = collect_platforms()
-    trasparenza_scuole_anac(data['www.trasparenzascuole.it'])
-    # FIXME: broken wrt encoding
-    #studiok_atti_di_concessione(data['www.studiok.it'])
+    #trasparenza_scuole_anac(data['www.trasparenzascuole.it'])
+    studiok_atti_di_concessione(data['www.studiok.it'])
 
     counter = Counter()
     for k, v in data.items():
