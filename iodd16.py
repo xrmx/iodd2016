@@ -213,7 +213,7 @@ def mkdir(path):
 
 if __name__ == '__main__':
     data = collect_platforms()
-    #trasparenza_scuole_anac(data['www.trasparenzascuole.it'])
+    trasparenza_scuole_anac(data['www.trasparenzascuole.it'])
     studiok_atti_di_concessione(data['www.studiok.it'])
 
     counter = Counter()
